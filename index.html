@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>FNaF 2: CUBES</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <style>
+        :root { --fnaf-red: #800; --fnaf-green: #0f0; }
+        body { 
+            margin: 0; background: #000; color: white; 
+            font-family: 'Courier New', Courier; overflow: hidden; 
+            user-select: none; touch-action: none;
+            display: flex; align-items: center; justify-content: center;
+            height: 100vh; width: 100vw;
+        }
+        
+        /* Samsung A06 Landscape Scaling */
+        canvas { 
+            max-width: 100%; max-height: 100%; 
+            aspect-ratio: 4 / 3; 
+            background: #000; border: 1px solid #333; 
+            box-shadow: 0 0 20px rgba(255,255,255,0.1);
+        }
+
+        #ui, #menuUI, #customNightUI { 
+            position: absolute; bottom: 5%; width: 90%; 
+            display: flex; justify-content: center; gap: 10px; z-index: 10; 
+        }
+
+        button { 
+            padding: clamp(8px, 2vw, 15px); 
+            background: #111; color: #fff; border: 2px solid #444; 
+            cursor: pointer; font-family: 'Courier New'; font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .hidden { display: none !important; }
+        
+        /* Dev Menu Styling */
+        #devMenu { 
+            position: absolute; top: 10%; left: 10%; width: 80%; max-height: 80%;
+            background: rgba(0,20,0,0.95); border: 2px solid var(--fnaf-green); 
+            padding: 20px; z-index: 1000; overflow-y: auto;
+        }
+
+        #devToggle { 
+            position: absolute; top: 10px; right: 10px; width: 60px; height: 30px; 
+            background: rgba(255,255,255,0.1); border: 1px solid #fff; 
+            display: flex; align-items: center; justify-content: center; font-size: 8px;
+        }
+
+        .reset-btn { background: var(--fnaf-red); border-color: #f00; margin-top: 15px; width: 100%; }
+    </style>
+</head>
+<body>
+
+<div id="devToggle" onclick="toggleDev()">DEV</div>
+
+<div id="devMenu" class="hidden">
+    <b style="color:var(--fnaf-green)">SYSTEM OVERRIDE</b><hr>
+    <button onclick="skipNight()">SKIP TO 6AM</button><br><br>
+    
+    <label>AI Mult:</label> <input type="number" id="aiMult" value="1" style="width:50px"><br><br>
+    
+    <label>Force Night:</label>
+    <select onchange="forceNight(this.value)" style="background:#000; color:#0f0;">
+        <option value="">Select...</option>
+        <option value="1">Night 1</option>
+        <option value="2">Night 2</option>
+        <option value="6">Night 6</option>
+        <option value="7">Night 7</option>
+        <option value="8">Night 8</option>
+    </select>
+
+    <br><br>
+    <label><input type="checkbox" id="cheatMusic"> Infinite Music Box</label>
+    
+    <button class="reset-btn" onclick="resetProgress()">RESET ALL PROGRESS</button>
+    <br><br>
+    <button onclick="toggleDev()">CLOSE MENU</button>
+</div>
+
+<div id="menuUI">
+    <div style="text-align:center">
+        <h1 style="font-size: clamp(1.5rem, 5vw, 3rem); margin-bottom: 5px;">FNaF 2: CUBES</h1>
+        <div id="nightList" style="display:flex; flex-wrap:wrap; justify-content:center; gap:5px;"></div>
+        <button onclick="showCustomNight()" id="btnNight7" class="hidden" style="color:cyan; margin-top:10px;">CUSTOM NIGHT</button>
+    </div>
+</div>
+
+<div id="customNightUI" class="hidden">
+    <div style="text-align:center">
+        <h2>CUSTOM NIGHT</h2>
+        Freddy AI: <input type="range" id="aiFreddy" min="0" max="20" value="0" oninput="this.nextElementSibling.value = this.value">
+        <output>0</output><br><br>
+        <button onclick="startNight(7)">START</button>
+        <button onclick="initMenu()">BACK</button>
+    </div>
+</div>
+
+<div id="ui" class="hidden">
+    <button id="btnLight">LIGHT</button>
+    <button id="btnMask">MASK</button>
+    <button id="btnCam">CAMS</button>
+    <button id="btnMusic" class="hidden" style="background: #400">WIND</button>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = 800; canvas.height = 600;
+
+let state = "MENU";
+let currentNight = 1;
+let unlockedNight = parseInt(localStorage.getItem('fnaf_save')) || 1;
+
+let hour = 12; let hourTimer = 0; let musicBox = 100;
+let maskOn = false; let camOpen = false; let lightOn = false;
+let freddy = { pos: 0, ai: 0, lastMove: 0 };
+let foxy = { active: false, inHall: false, flashesNeeded: 5, flashCount: 0 };
+
+function toggleDev() { document.getElementById('devMenu').classList.toggle('hidden'); }
+
+function resetProgress() {
+    if(confirm("Permanently wipe all save data?")) {
+        localStorage.clear();
+        unlockedNight = 1;
+        toggleDev();
+        initMenu();
+    }
+}
+
+function forceNight(n) {
+    if(!n) return;
+    toggleDev();
+    startNight(parseInt(n));
+}
+
+function showCustomNight() {
+    document.getElementById('menuUI').classList.add('hidden');
+    document.getElementById('customNightUI').classList.remove('hidden');
+}
+
+function initMenu() {
+    state = "MENU";
+    document.getElementById('menuUI').classList.remove('hidden');
+    document.getElementById('ui').classList.add('hidden');
+    document.getElementById('customNightUI').classList.add('hidden');
+    
+    let list = document.getElementById('nightList');
+    list.innerHTML = "";
+    // Display available nights
+    for(let i=1; i<=6; i++) {
+        if(i <= unlockedNight) {
+            let b = document.createElement('button');
+            b.innerText = "N" + i;
+            b.onclick = () => startNight(i);
+            list.appendChild(b);
+        }
+    }
+    // Logic for Night 7 & 8 access
+    if (unlockedNight >= 7) document.getElementById('btnNight7').classList.remove('hidden');
+}
+
+function startNight(n) {
+    currentNight = n;
+    hour = 12; hourTimer = 0; musicBox = 100;
+    maskOn = false; camOpen = false; lightOn = false;
+    freddy.pos = 0; foxy.inHall = false;
+    state = "OFFICE";
+    
+    let multiplier = parseInt(document.getElementById('aiMult').value) || 1;
+
+    if(n == 7) {
+        freddy.ai = parseInt(document.getElementById('aiFreddy').value) * multiplier;
+        foxy.active = (freddy.ai > 0);
+    } else if(n == 8) {
+        freddy.ai = 0; foxy.active = true;
+    } else {
+        freddy.ai = (n * 2) * multiplier;
+        foxy.active = (n >= 2);
+    }
+
+    document.getElementById('menuUI').classList.add('hidden');
+    document.getElementById('customNightUI').classList.add('hidden');
+    document.getElementById('ui').classList.remove('hidden');
+}
+
+function winNight() {
+    state = "MENU";
+    if(currentNight < 7 && currentNight >= unlockedNight) {
+        unlockedNight = currentNight + 1;
+        localStorage.setItem('fnaf_save', unlockedNight);
+    }
+    // Check for Night 8 unlock condition (Night 7 with 20 AI)
+    if(currentNight == 7 && freddy.ai >= 20) {
+        localStorage.setItem('fnaf_save', 8);
+        unlockedNight = 8;
+    }
+    alert("6 AM!");
+    initMenu();
+}
+
+function skipNight() { winNight(); }
+
+function update() {
+    if(state === "OFFICE") {
+        hourTimer++;
+        if(hourTimer >= 3000) { 
+            hourTimer = 0;
+            hour = (hour === 12) ? 1 : hour + 1;
+            if(hour === 6) winNight();
+        }
+
+        if(!document.getElementById('cheatMusic').checked) musicBox -= 0.03;
+        if(musicBox <= 0) { alert("Game Over: The Puppet"); initMenu(); }
+
+        if(freddy.ai > 0 && Date.now() - freddy.lastMove > 4000) {
+            if(Math.random() * 20 < freddy.ai) freddy.pos++;
+            freddy.lastMove = Date.now();
+        }
+
+        if(freddy.pos > 3) {
+            if(maskOn) { freddy.pos = 0; } 
+            else { alert("Jumpscare: Freddy"); initMenu(); }
+        }
+
+        if(foxy.active && !foxy.inHall && Math.random() < 0.003) {
+            foxy.inHall = true;
+            foxy.flashesNeeded = Math.floor(Math.random() * 17) + 3;
+            foxy.flashCount = 0;
+        }
+    }
+    draw();
+    requestAnimationFrame(update);
+}
+
+function draw() {
+    ctx.fillStyle = "black";
+    ctx.fillRect(0,0,canvas.width, canvas.height);
+    
+    if(state === "OFFICE") {
+        if(lightOn) { ctx.fillStyle = "#111"; ctx.fillRect(200,100,400,400); }
+        if(freddy.pos == 2 && lightOn) { ctx.fillStyle="brown"; ctx.fillRect(350,250,100,100); }
+        if(freddy.pos == 3) { ctx.fillStyle="brown"; ctx.fillRect(100,50,600,500); }
+        if(foxy.inHall && lightOn) { ctx.fillStyle="red"; ctx.fillRect(380,280,40,40); }
+
+        if(camOpen) {
+            ctx.fillStyle = "rgba(0,0,40,0.95)"; ctx.fillRect(0,0,800,600);
+            ctx.fillStyle = "white"; ctx.fillText("CAM 11: PRIZE CORNER", 50, 50);
+            document.getElementById('btnMusic').classList.remove('hidden');
+        } else {
+            document.getElementById('btnMusic').classList.add('hidden');
+        }
+
+        if(maskOn) { ctx.fillStyle = "rgba(40,0,0,0.3)"; ctx.fillRect(0,0,800,600); }
+
+        ctx.fillStyle = "white"; ctx.font = "24px Courier";
+        ctx.fillText(hour + " AM", 700, 40);
+        ctx.fillText("Night " + currentNight, 20, 40);
+        ctx.fillText("Box: " + Math.floor(musicBox) + "%", 20, 570);
+    }
+}
+
+// Touch Handling for Mobile
+document.getElementById('btnLight').addEventListener('pointerdown', (e) => { 
+    lightOn = true; 
+    if(foxy.inHall) {
+        foxy.flashCount++;
+        if(foxy.flashCount >= foxy.flashesNeeded) { foxy.inHall = false; }
+    }
+});
+document.getElementById('btnLight').addEventListener('pointerup', () => lightOn = false);
+document.getElementById('btnMask').onclick = () => { if(!camOpen) maskOn = !maskOn; };
+document.getElementById('btnCam').onclick = () => { if(!maskOn) camOpen = !camOpen; };
+document.getElementById('btnMusic').addEventListener('pointerdown', () => { musicBox = Math.min(100, musicBox + 6); });
+
+initMenu();
+update();
+</script>
+</body>
+</html>
